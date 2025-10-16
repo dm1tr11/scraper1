@@ -62,50 +62,60 @@ def click_next_page(driver):
 def extract_mayor_from_municipality(driver, url):
     result = {"municipality": "", "mayor": "", "emails": [], "url": url}
     driver.get(url)
-    time.sleep(1.2)
+    time.sleep(1.5)
 
-    # Municipality title
+    # Municipality name
     try:
         result["municipality"] = driver.find_element(By.CSS_SELECTOR, "h1").text.strip()
     except Exception:
         pass
 
-    # Find the mayor row ("Кмет на община")
+    # Find the "Кмет на община" block
     try:
-        mayor_row = driver.find_element(By.XPATH, "//td[contains(.,'Кмет на община')]/following-sibling::td")
-        result["mayor"] = mayor_row.text.strip()
-    except Exception:
-        pass
-
-    # Click the “Информация” button (opens modal)
-    try:
-        info_btn = WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable((By.XPATH, "//a[contains(text(),'Информация')]"))
+        mayor_node = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.XPATH, "//div[contains(@class,'node-title') and contains(.,'Кмет на община')]/parent::div"))
         )
-        driver.execute_script("arguments[0].click();", info_btn)
+        # Extract mayor name if visible on page
+        try:
+            mayor_text = mayor_node.find_element(By.XPATH, ".//div[contains(@class,'node-title')]").text.strip()
+            result["mayor"] = mayor_text
+        except Exception:
+            pass
 
-        # Wait for modal to appear
+        # Find and click the info icon inside that node
+        info_icon = mayor_node.find_element(By.CSS_SELECTOR, "div.show-icon[title='Информация']")
+        driver.execute_script("arguments[0].click();", info_icon)
+
+        # Wait for the modal to load
         modal = WebDriverWait(driver, 10).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "div.modal-content"))
         )
-        time.sleep(0.5)
+        time.sleep(0.6)
+
         modal_html = modal.get_attribute("innerHTML")
         soup = BeautifulSoup(modal_html, "lxml")
 
-        # Extract email
+        # Find email inside modal
         label = soup.find(string=lambda s: s and "Електронна поща" in s)
         if label:
-            parent = label.parent
-            mailto = parent.find_next("a", href=lambda h: h and "mailto:" in h)
+            mailto = soup.find("a", href=lambda h: h and "mailto:" in h)
             if mailto:
                 email = mailto["href"].replace("mailto:", "").strip()
                 result["emails"].append(email)
             else:
-                text_email = email_re.search(modal_html)
-                if text_email:
-                    result["emails"].append(text_email.group(0))
-        # Close modal
-        driver.find_element(By.CSS_SELECTOR, "button.btn-close").click()
+                # fallback: regex search
+                m = re.search(email_re, modal_html)
+                if m:
+                    result["emails"].append(m.group(0))
+
+        # Close the modal
+        try:
+            close_btn = driver.find_element(By.CSS_SELECTOR, "button.btn-close, button.close")
+            driver.execute_script("arguments[0].click();", close_btn)
+        except Exception:
+            driver.execute_script("document.querySelector('div.modal.show button')?.click();")
+        time.sleep(0.4)
+
     except Exception as e:
         print(f"  [!] Could not extract modal info for {result['municipality']}: {e}")
 
